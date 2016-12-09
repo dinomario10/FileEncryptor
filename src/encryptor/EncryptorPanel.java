@@ -5,8 +5,6 @@ import java.awt.event.*;
 import javax.swing.*;
 
 import java.io.*;
-import java.nio.ByteBuffer;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
@@ -59,8 +57,8 @@ public class EncryptorPanel extends JPanel {
 	/** The initial progress bar foreground color */
 	private Color initialProgressBarColor = progressBar.getForeground();
 	
-	/** Hash code of entered password, used for encrypting files */
-	private int passwordHash;
+	/** Hash of entered password, used for encrypting files */
+	private String passwordHash;
 	
 	/** A listener which calls the function to delete the selected files */
 	private ActionListener removeListener = (e) -> {
@@ -82,7 +80,6 @@ public class EncryptorPanel extends JPanel {
 			for (File file : remaining) {
 				totalSize += file.length();
 			}
-			totalSize += PASSWORD_LENGTH*totalFiles;
 			
 			totalFilesTf.setText(Integer.toString(totalFiles));
 			totalSizeTf.setText(humanReadableByteCount(totalSize));
@@ -179,7 +176,7 @@ public class EncryptorPanel extends JPanel {
 		lowerBtns.add(encryptBtn, BorderLayout.CENTER);
 		
 		encryptBtn.addActionListener((e) -> {
-			encrypt();
+			start();
 		});
 		
 		cancelBtn = new JButton("Cancel");
@@ -195,7 +192,7 @@ public class EncryptorPanel extends JPanel {
 	 * Prepare the encrypting by disabling GUI components, and creating and
 	 * executing the {@linkplain SwingWorker} task.
 	 */
-	private void encrypt() {
+	private void start() {
 		/* Reset the progress. */
 		progressBar.setValue(0);
 		progressBar.setForeground(initialProgressBarColor);
@@ -257,7 +254,6 @@ public class EncryptorPanel extends JPanel {
 				totalSize += file.length();
 			}
 			totalFiles = files.length;
-			totalSize += PASSWORD_LENGTH*totalFiles;
 			
 			/* Enable the remove button. */
 			removeBtn.setEnabled(true);
@@ -317,11 +313,11 @@ public class EncryptorPanel extends JPanel {
 		 * Encrypts the given {@code file} using the given {@code hash}.
 		 * 
 		 * @param file file to be encrypted
-		 * @param hash hash code to be used when encrypting this file
+		 * @param hash hash to be used when encrypting this file
 		 * @param deleteFile deletes the original file after encrypting if true
 		 * @param encryptName encrypts the file name upon encrypting the file
 		 */
-		private void encryptFile(File file, int hash, boolean deleteFile, boolean encryptName) {
+		private void encryptFile(File file, String hash, boolean deleteFile, boolean encryptName) {
 			String newFileName = (encryptName ? encryptName(file.getName()) : file.getName()) + FILE_EXTENSION;
 			File outputFile = new File(file.getParentFile(), newFileName);
 			
@@ -341,18 +337,20 @@ public class EncryptorPanel extends JPanel {
 					BufferedInputStream in = new BufferedInputStream(new FileInputStream(file));
 					BufferedOutputStream out = new BufferedOutputStream(new FileOutputStream(outputFile));
 			) {
-				storePassword(out, hash);
 
 				int len;
 				byte[] bytes = new byte[STD_LOADER_SIZE];
+				Crypto crypto = new Crypto(hash, Crypto.ENCRYPT);
+				
 				while ((len = in.read(bytes)) > 0 && !isCancelled()) {
-					byte[] encryptedBytes = encryptBytes(bytes, hash, len);
+					byte[] encryptedBytes = crypto.update(bytes, 0, len);
 					out.write(encryptedBytes);
 					
 					/* Update the progress bar. */
 					totalEncryptedSize += len;
 					setProgress((int) (100 * totalEncryptedSize / totalSize));
 				}
+				out.write(crypto.doFinal());
 				
 			} catch (Exception e) {
 				showError(EncryptorPanel.this, "An error occured while processing file " + file);
@@ -362,18 +360,9 @@ public class EncryptorPanel extends JPanel {
 			System.out.println("Total encrypted: " + totalEncryptedSize);
 			System.out.println("Total size: " + totalSize);
 			
-			if (deleteFile) {
+			if (deleteFile && !isCancelled()) {
 				file.delete();
 			}
-		}
-		
-		private void storePassword(BufferedOutputStream out, int password) throws IOException {
-			ByteBuffer b = ByteBuffer.allocate(PASSWORD_LENGTH);
-			b.putInt(password);
-			byte[] result = b.array();
-			out.write(result);
-			
-			totalEncryptedSize += result.length;
 		}
 
 		/**
@@ -444,24 +433,24 @@ public class EncryptorPanel extends JPanel {
 			}
 			
 			/**
-			 * Returns the hash code of the entered password. If no characters
-			 * are entered, or more formally if {@code password.length == 0}, a
+			 * Returns the code of the entered password. If no characters are
+			 * entered, or more formally if {@code password.length == 0}, a
 			 * {@linkplain NullPointerException} is thrown. If the passwords in
-			 * both fields do not match, an {@linkplain IllegalArgumentException}
-			 * is thrown.
+			 * both fields do not match, an
+			 * {@linkplain IllegalArgumentException} is thrown.
 			 * 
-			 * @return hash code of the entered password
+			 * @return hash of the entered password
 			 * @throws NullPointerException if password.length == 0
 			 * @throws IllegalArgumentException if the passwords do not match
 			 */
-			private int getPasswordHash() {
+			private String getPasswordHash() {
 				if (passwordField1.getPassword().length == 0 || passwordField2.getPassword().length == 0) {
 					throw new NullPointerException("Password not entered.");
 				}
 				
-				int passHash1 = Arrays.hashCode(passwordField1.getPassword());
-				int passHash2 = Arrays.hashCode(passwordField2.getPassword());
-				if (passHash1 != passHash2) {
+				String passHash1 = generatePasswordHash(String.valueOf(passwordField1.getPassword()));
+				String passHash2 = generatePasswordHash(String.valueOf(passwordField2.getPassword()));
+				if (!passHash1.equals(passHash2)) {
 					throw new IllegalArgumentException("Passwords do not match.");
 				}
 				

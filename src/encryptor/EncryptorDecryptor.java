@@ -20,7 +20,9 @@ public class EncryptorDecryptor {
 	 * @param hash hash used for encryption
 	 * @param len length considered for encrypting
 	 * @return the encrypted array of bytes
+	 * @deprecated Use {@link Crypto} instead
 	 */
+	@Deprecated
 	public static byte[] encryptBytes(byte[] bytes, int hash, int len) {
 		byte[] encryptedBytes = new byte[len];
 		
@@ -40,7 +42,9 @@ public class EncryptorDecryptor {
 	 * @param hash hash used for decryption
 	 * @param len length considered for decrypting
 	 * @return the decrypted array of bytes
+	 * @deprecated Use {@link Crypto} instead
 	 */
+	@Deprecated
 	public static byte[] decryptBytes(byte[] bytes, int hash, int len) {
 		byte[] decryptedBytes = new byte[len];
 		

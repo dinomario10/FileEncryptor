@@ -5,8 +5,6 @@ import java.awt.event.*;
 import javax.swing.*;
 
 import java.io.*;
-import java.nio.ByteBuffer;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
@@ -59,8 +57,8 @@ public class DecryptorPanel extends JPanel {
 	/** The initial progress bar foreground color */
 	private Color initialProgressBarColor = progressBar.getForeground();
 	
-	/** Hash code of entered password, used for decrypting files */
-	private int passwordHash;
+	/** Hash of entered password, used for decrypting files */
+	private String passwordHash;
 	
 	/** A listener which calls the function to delete the selected files */
 	private ActionListener removeListener = (e) -> {
@@ -178,7 +176,7 @@ public class DecryptorPanel extends JPanel {
 		lowerBtns.add(decryptBtn, BorderLayout.CENTER);
 		
 		decryptBtn.addActionListener((e) -> {
-			decrypt();
+			start();
 		});
 		
 		cancelBtn = new JButton("Cancel");
@@ -194,7 +192,7 @@ public class DecryptorPanel extends JPanel {
 	 * Prepare the decrypting by disabling GUI components, and creating and
 	 * executing the {@linkplain SwingWorker} task.
 	 */
-	private void decrypt() {
+	private void start() {
 		/* Reset the progress. */
 		progressBar.setValue(0);
 		progressBar.setForeground(initialProgressBarColor);
@@ -315,60 +313,57 @@ public class DecryptorPanel extends JPanel {
 		 * Decrypts the given {@code file} using the given {@code hash}.
 		 * 
 		 * @param file file to be decrypted
-		 * @param hash hash code to be used when decrypting this file
+		 * @param hash hash to be used when decrypting this file
 		 * @param deleteFile deletes the encrypted file after decrypting if true
 		 * @param decryptName decrypts the file name upon decrypting the file
 		 */
-		private void decryptFile(File file, int hash, boolean deleteFile, boolean decryptName) {
-			/* Prepare the input stream. */
-			try (BufferedInputStream in = new BufferedInputStream(new FileInputStream(file))) {
-				/* If the password is incorrect, there's no point in going further. */
-				boolean passwordCorrect = checkPassword(in, hash);
-				if (!passwordCorrect) {
-					showError(DecryptorPanel.this, "Incorrect password for file " + file);
-					return;
-				}
-				
-				/* Remove the extension of the encrypted file and create the output file. */
-				String fileName = file.getName().replace(FILE_EXTENSION, "");
-				String newFileName;
-				if (decryptName) {
-					try {
-						newFileName = decryptName(fileName);
-					} catch (IllegalArgumentException e) {
-						showInformation(DecryptorPanel.this,
-								"Decrypted name of file " + file + " has been tampered with.\nOnly the file will be decrypted.");
-						newFileName = fileName;
-					}
-				} else {
+		private void decryptFile(File file, String hash, boolean deleteFile, boolean decryptName) {
+			/* Remove the extension of the encrypted file and create the output file. */
+			String fileName = file.getName().replace(FILE_EXTENSION, "");
+			String newFileName;
+			if (decryptName) {
+				try {
+					newFileName = decryptName(fileName);
+				} catch (IllegalArgumentException e) {
+					showInformation(DecryptorPanel.this,
+							"Decrypted name of file " + file + " has been tampered with.\nOnly the file will be decrypted.");
 					newFileName = fileName;
 				}
-				File outputFile = new File(file.getParentFile(), newFileName);
-				
-				/* Ask the user if he wants to overwrite the file. */
-				if (overwritePrompt && outputFile.exists()) {
-					boolean overwrite = showQuestion(DecryptorPanel.this,
-							"File " + outputFile + " already exists.\nOverwrite this file" + (totalFiles==1?"?":"and future files?"));
-					if (overwrite == true) {
-						overwritePrompt = false;
-					} else {
-						return;
-					}
+			} else {
+				newFileName = fileName;
+			}
+			File outputFile = new File(file.getParentFile(), newFileName);
+			
+			/* Ask the user if he wants to overwrite the file. */
+			if (overwritePrompt && outputFile.exists()) {
+				boolean overwrite = showQuestion(DecryptorPanel.this,
+						"File " + outputFile + " already exists.\nOverwrite this file" + (totalFiles==1?"?":"and future files?"));
+				if (overwrite == true) {
+					overwritePrompt = false;
+				} else {
+					return;
 				}
+			}
 
-				/* Create the output stream and write decrypted bytes to it. */
-				try (BufferedOutputStream out = new BufferedOutputStream(new FileOutputStream(outputFile))) {
-					int len;
-					byte[] bytes = new byte[STD_LOADER_SIZE];
-					while ((len = in.read(bytes)) > 0  && !isCancelled()) {
-						byte[] decryptedBytes = decryptBytes(bytes, hash, len);
-						out.write(decryptedBytes);
-						
-						/* Update the progress bar. */
-						totalDecryptedSize += len;
-						setProgress((int) (100 * totalDecryptedSize / totalSize));
-					}
+			/* Create the output stream and write decrypted bytes to it. */
+			try (
+					BufferedInputStream in = new BufferedInputStream(new FileInputStream(file));
+					BufferedOutputStream out = new BufferedOutputStream(new FileOutputStream(outputFile));
+			) {
+				
+				int len;
+				byte[] bytes = new byte[STD_LOADER_SIZE];
+				Crypto crypto = new Crypto(hash, Crypto.DECRYPT);
+				
+				while ((len = in.read(bytes)) > 0  && !isCancelled()) {
+					byte[] decryptedBytes = crypto.update(bytes, 0, len);
+					out.write(decryptedBytes);
+					
+					/* Update the progress bar. */
+					totalDecryptedSize += len;
+					setProgress((int) (100 * totalDecryptedSize / totalSize));
 				}
+				out.write(crypto.doFinal());
 				
 			} catch (Exception e) {
 				showError(DecryptorPanel.this, "An error occured while processing file " + file);
@@ -378,26 +373,8 @@ public class DecryptorPanel extends JPanel {
 			System.out.println("Total decrypted: " + totalDecryptedSize);
 			System.out.println("Total size: " + totalSize);
 			
-			if (deleteFile) {
+			if (deleteFile && !isCancelled()) {
 				file.delete();
-			}
-		}
-		
-		private boolean checkPassword(BufferedInputStream in, int password) throws IOException {
-			ByteBuffer b = ByteBuffer.allocate(PASSWORD_LENGTH);
-			b.putInt(password);
-			byte[] result = b.array();
-			
-			byte[] readings = new byte[result.length];
-			in.read(readings);
-
-			/* If arrays are not of the same contents,
-			 * the user has entered an incorrect password */
-			if (!Arrays.equals(result, readings)) {
-				return false;
-			} else {
-				totalDecryptedSize += readings.length;
-				return true;
 			}
 		}
 
@@ -461,19 +438,19 @@ public class DecryptorPanel extends JPanel {
 			}
 			
 			/**
-			 * Returns the hash code of the entered password. If no characters
-			 * are entered, or more formally if {@code password.length == 0}, a
+			 * Returns the hash of the entered password. If no characters are
+			 * entered, or more formally if {@code password.length == 0}, a
 			 * {@linkplain NullPointerException} is thrown.
 			 * 
-			 * @return hash code of the entered password
+			 * @return hash of the entered password
 			 * @throws NullPointerException if password.length == 0
 			 */
-			private int getPasswordHash() {
+			private String getPasswordHash() {
 				if (passwordField.getPassword().length == 0) {
 					throw new NullPointerException("Password not entered.");
 				}
 				
-				return Arrays.hashCode(passwordField.getPassword());
+				return generatePasswordHash(String.valueOf(passwordField.getPassword()));
 			}
 		}
 		

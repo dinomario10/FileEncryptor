@@ -1,7 +1,12 @@
 package encryptor;
 
 import java.awt.*;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+
 import javax.swing.*;
+import javax.xml.bind.DatatypeConverter;
 
 /**
  * A collection of constants and methods generally used for visually
@@ -12,13 +17,10 @@ import javax.swing.*;
 public abstract class ConstantsAndMethods {
 
 	/** Extension that will be added to encrypted files */
-	public static final String FILE_EXTENSION = ".encrypted";
+	public static final String FILE_EXTENSION = ".crypt";
 	
 	/** Standard size for the loading byte buffer array */
-	public static final int STD_LOADER_SIZE = 1024;
-	
-	/** Length of the password implanted into the encrypted files */
-	public static final int PASSWORD_LENGTH = Integer.BYTES;
+	public static final int STD_LOADER_SIZE = 4096;
 	
 	/**
 	 * Converts the number of bytes to a human readable byte count with binary
@@ -64,6 +66,29 @@ public abstract class ConstantsAndMethods {
 	protected static boolean showQuestion(Component parent, String message) {
 		int retVal = JOptionPane.showConfirmDialog(parent, message, "Question", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
 		return retVal == JOptionPane.YES_OPTION ? true : false;
+	}
+	
+	/**
+	 * Generates the 40 character long SHA-1 password hash of the user's
+	 * password by converting the specified <tt>password</tt> to an array of
+	 * bytes decoded with the {@link StandardCharsets#UTF_8 UTF-8} charset and
+	 * digested with the hash-algorithm.
+	 * 
+	 * @param password password to be hashed
+	 * @return the hash of the specified <tt>password</tt>
+	 */
+	public static String generatePasswordHash(String password) {
+		String pass = password.concat("peaches.*"); // add salt
+		byte[] passwordBytes = pass.getBytes(StandardCharsets.UTF_8);
+		
+		MessageDigest md;
+		try {
+			md = MessageDigest.getInstance("SHA-1");
+		} catch (NoSuchAlgorithmException e) {
+			throw new InternalError("Algorithm unavailable (SHA-1)", e);
+		}
+		
+		return DatatypeConverter.printHexBinary(md.digest(passwordBytes));
 	}
 
 }
